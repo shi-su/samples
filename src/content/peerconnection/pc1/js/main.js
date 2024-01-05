@@ -41,6 +41,7 @@ remoteVideo.addEventListener('resize', () => {
 });
 
 let localStream;
+let screenMedia;
 let pc1;
 let pc2;
 const offerOptions = {
@@ -58,12 +59,14 @@ function getOtherPc(pc) {
 
 async function start() {
   console.log('Requesting local stream');
+  console.log('Requesting local stream 2222222');
   startButton.disabled = true;
   try {
     const stream = await navigator.mediaDevices.getUserMedia({audio: true, video: true});
     console.log('Received local stream');
     localVideo.srcObject = stream;
     localStream = stream;
+    screenMedia = await navigator.mediaDevices.getDisplayMedia();
     callButton.disabled = false;
   } catch (e) {
     alert(`getUserMedia() error: ${e.name}`);
@@ -95,12 +98,53 @@ async function call() {
   pc2.addEventListener('iceconnectionstatechange', e => onIceStateChange(pc2, e));
   pc2.addEventListener('track', gotRemoteStream);
 
-  localStream.getTracks().forEach(track => pc1.addTrack(track, localStream));
+  // localStream.getTracks().forEach(track => pc1.addTrack(track, localStream));
+  pc1.addTrack(audioTracks[0], localStream);
+  pc1.addTrack(screenMedia.getTracks()[0], screenMedia);
+  pc1.addTrack(videoTracks[0], localStream);
   console.log('Added local stream to pc1');
 
+  let mid = 0;
+  
   try {
     console.log('pc1 createOffer start');
     const offer = await pc1.createOffer(offerOptions);
+    var separateLines = offer.sdp.split(/\r?\n|\r|\n/g);
+    let newSdp = '';
+    for (let line of separateLines) {
+      if (line == '') {
+        continue;
+      }
+      if (line.includes('transport-cc') || line.includes('transport-wide')) {
+        continue;
+      }
+
+      if (line.includes('a=mid:1')) {
+        mid = 1;
+      } else if (line.includes('a=mid:2')) {
+        mid = 2;
+      }
+      if (mid == 1) {
+        if (line.includes('a=sendrecv')) {
+          newSdp += 'a=inactive\n';
+          continue;
+        }
+        // if (line == 'a=setup:actpass') {
+        //   newSdp += 'a=setup:passive\n';
+        //   continue;
+        // }
+        if (line.includes('a=extmap:')) {
+          continue;
+        }
+      } else if (mid == 2) {
+        if (line.includes('a=sendrecv')) {
+          newSdp += 'a=sendonly\n';
+          continue;
+        }
+      }
+      newSdp += line + '\n';
+    }
+    offer.sdp = newSdp;
     await onCreateOfferSuccess(offer);
   } catch (e) {
     onCreateSessionDescriptionError(e);
